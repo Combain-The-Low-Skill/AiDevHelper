@@ -78,31 +78,46 @@ const server = http.createServer((req, res) => {
         return;
     }
 
-    // МАРШРУТ 2: Передача контекста папки и задачи в ИИ Gemini
+    // МАРШРУТ 2: Передача контекста папки и задачи в ИИ (с потоковым прогрессом, БЕЗ записи на диск)
     if (req.url === "/api/task" && req.method === "POST") {
         let body = "";
         req.on("data", chunk => { body += chunk.toString(); });
         req.on("end", async () => {
+            // Стримим ответ построчно (NDJSON), чтобы фронтенд видел прогресс в реальном времени
+            res.writeHead(200, { "Content-Type": "application/x-ndjson", "Transfer-Encoding": "chunked" });
+            const send = (obj) => res.write(JSON.stringify(obj) + "\n");
+
             try {
                 const { task, targetDir } = JSON.parse(body);
 
                 if (!targetDir || !fs.existsSync(targetDir)) {
-                    res.writeHead(400, { "Content-Type": "application/json" });
-                    res.end(JSON.stringify({ success: false, error: "Выбранная папка не найдена на диске компьютере!" }));
+                    send({ type: "error", error: "Выбранная папка не найдена на диске компьютере!" });
+                    res.end();
                     return;
                 }
 
+                // Защита: не даём программе работать со своей же директорией
+                const selfDir = path.resolve(__dirname);
+                if (path.resolve(targetDir) === selfDir) {
+                    send({ type: "error", error: "Нельзя выбирать папку самой программы как рабочую директорию — это может сломать сервер во время работы." });
+                    res.end();
+                    return;
+                }
+
+                send({ type: "progress", message: `📂 Сканируем директорию: ${targetDir}` });
                 console.log(`\n📂 Обрабатываем директорию: ${targetDir}`);
                 console.log(`🤖 Команда от пользователя: "${task}"`);
 
                 let projectFiles = scanDirectory(targetDir, targetDir);
-                
-                // Если пользователь выбрал пустую папку, создаем стартовую заглушку
+
                 if (projectFiles.length === 0) {
+                    send({ type: "progress", message: "📄 Папка пуста, создаём стартовый файл..." });
                     const defaultFile = path.join(targetDir, "index.html");
                     fs.writeFileSync(defaultFile, "<!DOCTYPE html>\n<html>\n<head><title>Новый проект</title></head>\n<body>\n\n</body>\n</html>", "utf8");
                     projectFiles = scanDirectory(targetDir, targetDir);
                 }
+
+                send({ type: "progress", message: `📑 Найдено файлов: ${projectFiles.length}. Формируем контекст...` });
 
                 let projectContext = "Вот текущая структура и код файлов в моем проекте:\n\n";
                 projectFiles.forEach(f => {
@@ -112,6 +127,8 @@ const server = http.createServer((req, res) => {
                 const systemInstruction = `Ты — эксперт-разработчик. Тебе передан контекст проекта. 
                 Выполни задачу пользователя. Ты должен вернуть ответ СТРОГО в формате JSON-массива объектов, без markdown разметки.
                 Формат ответа: [{"filePath": "относительный_путь", "newContent": "абсолютно полный новый код файла"}]`;
+
+                send({ type: "progress", message: "🤖 Отправляем запрос модели (Groq)..." });
 
                 const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
                     method: "POST",
@@ -135,32 +152,76 @@ const server = http.createServer((req, res) => {
                     throw new Error(groqData.error?.message || `Groq HTTP ошибка ${response.status}`);
                 }
 
+                send({ type: "progress", message: "📥 Получен ответ, разбираем изменения..." });
+
                 let cleanText = groqData.choices[0].message.content.trim();
                 if (cleanText.startsWith("```json")) cleanText = cleanText.substring(7);
                 if (cleanText.startsWith("```")) cleanText = cleanText.substring(3);
                 if (cleanText.endsWith("```")) cleanText = cleanText.substring(0, cleanText.length - 3);
 
                 const changes = JSON.parse(cleanText.trim());
+
+                // Собираем preview: для уже существующих файлов сохраняем старое содержимое для diff на фронте
+                const filesByPath = {};
+                projectFiles.forEach(f => { filesByPath[f.relativePath] = f.content; });
+
+                const preview = changes.map(change => ({
+                    filePath: change.filePath,
+                    newContent: change.newContent,
+                    oldContent: filesByPath[change.filePath] || null,
+                    isNew: !(change.filePath in filesByPath)
+                }));
+
+                send({ type: "progress", message: `✅ Сформировано предложение по ${preview.length} файлам. Ожидаем подтверждения.` });
+                send({ type: "result", targetDir, changes: preview });
+                res.end();
+
+            } catch (error) {
+                console.error("❌ Ошибка бэкэнда:", error.message);
+                send({ type: "error", error: error.message });
+                res.end();
+            }
+        });
+        return;
+    }
+
+    // МАРШРУТ 3: Применение подтверждённых изменений — реальная запись на диск
+    if (req.url === "/api/apply" && req.method === "POST") {
+        let body = "";
+        req.on("data", chunk => { body += chunk.toString(); });
+        req.on("end", () => {
+            try {
+                const { targetDir, changes } = JSON.parse(body);
+
+                if (!targetDir || !fs.existsSync(targetDir)) {
+                    res.writeHead(400, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ success: false, error: "Папка не найдена на диске." }));
+                    return;
+                }
+
+                const applied = [];
                 changes.forEach(change => {
                     const absolutePath = path.join(targetDir, change.filePath);
-                    // Перезаписываем или создаем файлы на жестком диске
+                    // Создаём промежуточные папки, если модель предложила файл во вложенной директории
+                    fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
                     fs.writeFileSync(absolutePath, change.newContent, "utf8");
+                    applied.push(change.filePath);
                     console.log(`✅ Успешно изменен файл: ${change.filePath}`);
                 });
 
                 res.writeHead(200, { "Content-Type": "application/json" });
-                res.end(JSON.stringify({ success: true, files: changes.map(c => c.filePath) }));
-
+                res.end(JSON.stringify({ success: true, files: applied }));
             } catch (error) {
-                console.error("❌ Ошибка бэкэнда:", error.message);
+                console.error("❌ Ошибка применения изменений:", error.message);
                 res.writeHead(500, { "Content-Type": "application/json" });
                 res.end(JSON.stringify({ success: false, error: error.message }));
             }
         });
-    } else {
-        res.writeHead(404);
-        res.end();
+        return;
     }
+
+    res.writeHead(404);
+    res.end();
 });
 
 server.listen(3000, () => {

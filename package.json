@@ -2,11 +2,13 @@
   "name": "aidevhelper",
   "version": "1.0.0",
   "main": "code.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "start": "node code.js"
   },
   "dependencies": {
-    "child_process": "^1.0.2",
     "dotenv": "^17.4.2"
   }
 }

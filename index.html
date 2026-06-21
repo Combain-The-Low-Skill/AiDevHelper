@@ -16,6 +16,23 @@
         button.main:hover { background: #0062a3; }
         #status { margin-top: 25px; color: #00ffcc; font-weight: bold; text-align: center; line-height: 1.6; }
         .path-text { color: #aaa; font-family: monospace; font-size: 13px; word-break: break-all; margin-top: 10px; }
+        #progressLog { margin-top: 15px; font-family: monospace; font-size: 13px; color: #8fd6ff; text-align: left; white-space: pre-wrap; max-height: 160px; overflow-y: auto; background: #1e1e24; border: 1px solid #3a3a45; border-radius: 6px; padding: 10px; display: none; }
+        #preview { margin-top: 20px; text-align: left; display: none; }
+        .file-card { background: #1e1e24; border: 1px solid #3a3a45; border-radius: 6px; margin-bottom: 12px; overflow: hidden; }
+        .file-card-header { padding: 10px 14px; background: #23232e; font-weight: bold; color: #fff; display: flex; justify-content: space-between; align-items: center; }
+        .file-card-header .badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: bold; }
+        .badge.new { background: #1e5c2e; color: #6fffa0; }
+        .badge.modified { background: #5c4a1e; color: #ffd76f; }
+        .diff-box { font-family: monospace; font-size: 12px; padding: 10px 14px; max-height: 220px; overflow-y: auto; white-space: pre-wrap; }
+        .diff-add { color: #6fffa0; background: rgba(60,180,90,0.12); display: block; }
+        .diff-del { color: #ff8f8f; background: rgba(200,60,60,0.12); display: block; }
+        .diff-ctx { color: #999; display: block; }
+        .actions-row { margin-top: 15px; display: flex; gap: 10px; }
+        .actions-row button { flex: 1; padding: 12px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 14px; }
+        #applyBtn { background: #1e8c4a; color: #fff; }
+        #applyBtn:hover { background: #176e3a; }
+        #cancelBtn { background: #8c1e1e; color: #fff; }
+        #cancelBtn:hover { background: #6e1717; }
     </style>
 </head>
 <body>
@@ -40,10 +57,14 @@
         <button class="main" onclick="sendTask()">Запустить ИИ-разработчика</button>
         
         <div id="status"></div>
+        <div id="progressLog"></div>
+        <div id="preview"></div>
     </div>
 
     <script>
         let globalSelectedFolder = null;
+        let pendingChanges = null;
+        let pendingTargetDir = null;
 
         // Делаем запрос к бэкэнду на запуск диалогового окна Проводника
         async function chooseFolder() {
@@ -71,10 +92,117 @@
             }
         }
 
-        // Отправка пути и задачи на бэкэнд
+        function escapeHtml(str) {
+            return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        // Простой построчный diff (LCS-подход для коротких/средних файлов)
+        function buildDiff(oldText, newText) {
+            const oldLines = (oldText || "").split("\n");
+            const newLines = (newText || "").split("\n");
+            const n = oldLines.length, m = newLines.length;
+            const dp = Array.from({ length: n + 1 }, () => new Int32Array(m + 1));
+            for (let i = n - 1; i >= 0; i--) {
+                for (let j = m - 1; j >= 0; j--) {
+                    dp[i][j] = oldLines[i] === newLines[j] ? dp[i+1][j+1] + 1 : Math.max(dp[i+1][j], dp[i][j+1]);
+                }
+            }
+            const out = [];
+            let i = 0, j = 0;
+            while (i < n && j < m) {
+                if (oldLines[i] === newLines[j]) { out.push({ t: 'ctx', l: oldLines[i] }); i++; j++; }
+                else if (dp[i+1][j] >= dp[i][j+1]) { out.push({ t: 'del', l: oldLines[i] }); i++; }
+                else { out.push({ t: 'add', l: newLines[j] }); j++; }
+            }
+            while (i < n) { out.push({ t: 'del', l: oldLines[i] }); i++; }
+            while (j < m) { out.push({ t: 'add', l: newLines[j] }); j++; }
+            return out;
+        }
+
+        function renderPreview(changes) {
+            const previewDiv = document.getElementById('preview');
+            let html = `<h3 style="color:#aaa; margin-bottom:10px;">Предлагаемые изменения (${changes.length}):</h3>`;
+
+            changes.forEach((c, idx) => {
+                const badge = c.isNew ? `<span class="badge new">новый файл</span>` : `<span class="badge modified">изменён</span>`;
+                html += `<div class="file-card">
+                    <div class="file-card-header"><span>📄 ${escapeHtml(c.filePath)}</span>${badge}</div>
+                    <div class="diff-box" id="diffBox${idx}"></div>
+                </div>`;
+            });
+
+            html += `<div class="actions-row">
+                <button id="applyBtn" onclick="applyChanges()">✅ Применить изменения</button>
+                <button id="cancelBtn" onclick="cancelChanges()">❌ Отменить</button>
+            </div>`;
+
+            previewDiv.innerHTML = html;
+            previewDiv.style.display = 'block';
+
+            // Рендерим diff отдельно (после вставки в DOM), чтобы не плодить гигантские строки в innerHTML заранее
+            changes.forEach((c, idx) => {
+                const box = document.getElementById(`diffBox${idx}`);
+                if (c.isNew || c.oldContent === null) {
+                    box.innerHTML = c.newContent.split("\n").map(l => `<span class="diff-add">+ ${escapeHtml(l)}</span>`).join("");
+                    return;
+                }
+                const diff = buildDiff(c.oldContent, c.newContent);
+                box.innerHTML = diff.map(d => {
+                    if (d.t === 'add') return `<span class="diff-add">+ ${escapeHtml(d.l)}</span>`;
+                    if (d.t === 'del') return `<span class="diff-del">- ${escapeHtml(d.l)}</span>`;
+                    return `<span class="diff-ctx">  ${escapeHtml(d.l)}</span>`;
+                }).join("");
+            });
+        }
+
+        function cancelChanges() {
+            pendingChanges = null;
+            pendingTargetDir = null;
+            document.getElementById('preview').innerHTML = '';
+            document.getElementById('preview').style.display = 'none';
+            document.getElementById('status').innerText = '🚫 Изменения отменены, файлы не были тронуты.';
+        }
+
+        async function applyChanges() {
+            const statusDiv = document.getElementById('status');
+            const applyBtn = document.getElementById('applyBtn');
+            if (!pendingChanges || !pendingTargetDir) return;
+
+            applyBtn.disabled = true;
+            applyBtn.innerText = '⏳ Применяем...';
+
+            try {
+                const response = await fetch('http://localhost:3000/api/apply', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ targetDir: pendingTargetDir, changes: pendingChanges })
+                });
+                const result = await response.json();
+
+                if (result.success) {
+                    statusDiv.innerHTML = '🎉 Готово! Файлы записаны на диск:<br>' + result.files.map(f => `📄 ${f}`).join('<br>');
+                    document.getElementById('preview').innerHTML = '';
+                    document.getElementById('preview').style.display = 'none';
+                    pendingChanges = null;
+                    pendingTargetDir = null;
+                } else {
+                    statusDiv.innerText = '❌ Ошибка применения: ' + result.error;
+                    applyBtn.disabled = false;
+                    applyBtn.innerText = '✅ Применить изменения';
+                }
+            } catch (err) {
+                statusDiv.innerText = '❌ Не удалось связаться с сервером.';
+                applyBtn.disabled = false;
+                applyBtn.innerText = '✅ Применить изменения';
+            }
+        }
+
+        // Отправка пути и задачи на бэкэнд, чтение потока прогресса
         async function sendTask() {
             const taskText = document.getElementById('taskInput').value;
             const statusDiv = document.getElementById('status');
+            const logDiv = document.getElementById('progressLog');
+            const previewDiv = document.getElementById('preview');
 
             if (!globalSelectedFolder) { 
                 alert('Пожалуйста, сначала выберите рабочую папку на вашем компьютере!'); 
@@ -85,7 +213,11 @@
                 return; 
             }
 
-            statusDiv.innerText = '⏳ Бэкэнд сканирует файлы папки и отправляет запрос в Gemini...';
+            previewDiv.innerHTML = '';
+            previewDiv.style.display = 'none';
+            logDiv.style.display = 'block';
+            logDiv.innerText = '';
+            statusDiv.innerText = '⏳ Запускаем задачу...';
 
             try {
                 const response = await fetch('http://localhost:3000/api/task', {
@@ -94,13 +226,39 @@
                     body: JSON.stringify({ targetDir: globalSelectedFolder, task: taskText })
                 });
 
-                const result = await response.json();
+                if (!response.ok && !response.body) {
+                    throw new Error('Сервер недоступен');
+                }
 
-                if (result.success) {
-                    statusDiv.innerHTML = '🎉 Готово! Робот успешно обновил файлы:<br>' + 
-                                          result.files.map(f => `📄 ${f}`).join('<br>');
-                } else {
-                    statusDiv.innerText = '❌ Ошибка на стороне сервера: ' + result.error;
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = "";
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+
+                    let lines = buffer.split("\n");
+                    buffer = lines.pop(); // последняя строка может быть неполной
+
+                    for (const line of lines) {
+                        if (!line.trim()) continue;
+                        const msg = JSON.parse(line);
+
+                        if (msg.type === 'progress') {
+                            logDiv.innerText += msg.message + "\n";
+                            logDiv.scrollTop = logDiv.scrollHeight;
+                            statusDiv.innerText = msg.message;
+                        } else if (msg.type === 'error') {
+                            statusDiv.innerText = '❌ Ошибка: ' + msg.error;
+                        } else if (msg.type === 'result') {
+                            pendingChanges = msg.changes;
+                            pendingTargetDir = msg.targetDir;
+                            statusDiv.innerText = '👀 Проверьте предложенные изменения ниже перед применением.';
+                            renderPreview(msg.changes);
+                        }
+                    }
                 }
             } catch (err) {
                 statusDiv.innerText = '❌ Не удалось связаться с сервером. Проверьте окно консоли.';
