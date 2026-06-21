@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Управление ИИ Ассистентом</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #1e1e24; color: #fff; padding: 40px; }
+        .container { max-width: 650px; margin: 0 auto; background: #2a2a35; padding: 30px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
+        h2 { text-align: center; color: #007acc; margin-top: 0; }
+        .box { background: #1e1e24; padding: 15px; border-radius: 6px; margin-bottom: 20px; border: 1px solid #3a3a45; }
+        label { display: block; margin-bottom: 10px; font-weight: bold; color: #ccc; }
+        button.secondary { background: #4a4a5a; color: #fff; padding: 12px 18px; font-size: 14px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; transition: background 0.2s; }
+        button.secondary:hover { background: #3a3a4a; }
+        input[type="text"] { width: 100%; padding: 12px; border-radius: 4px; border: 1px solid #444; background: #1e1e24; color: #fff; box-sizing: border-box; font-size: 14px; }
+        button.main { width: 100%; padding: 14px; background: #007acc; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 16px; margin-top: 10px; transition: background 0.2s; }
+        button.main:hover { background: #0062a3; }
+        #status { margin-top: 25px; color: #00ffcc; font-weight: bold; text-align: center; line-height: 1.6; }
+        .path-text { color: #aaa; font-family: monospace; font-size: 13px; word-break: break-all; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h2>🤖 Мой Персональный ИИ-Кодер</h2>
+        <p style="text-align: center; color: #aaa; margin-bottom: 25px;">Графический интерфейс для управления локальной кодовой базой</p>
+        
+        <!-- Выбор папки -->
+        <div class="box">
+            <label>1. Рабочая директория проекта:</label>
+            <button class="secondary" onclick="chooseFolder()">📁 Выбрать папку на ПК</button>
+            <div class="path-text">Текущий путь: <span id="currentPath" style="color: #ff4a4a; font-weight: bold;">ДИРЕКТОРИЯ НЕ ВЫБРАНА</span></div>
+        </div>
+
+        <!-- Ввод задачи -->
+        <div class="box">
+            <label for="taskInput">2. Что ИИ должен сделать в этой папке:</label>
+            <input type="text" id="taskInput" placeholder="Например: сделай красивую главную страницу с формой контактов...">
+        </div>
+
+        <button class="main" onclick="sendTask()">Запустить ИИ-разработчика</button>
+        
+        <div id="status"></div>
+    </div>
+
+    <script>
+        let globalSelectedFolder = null;
+
+        // Делаем запрос к бэкэнду на запуск диалогового окна Проводника
+        async function chooseFolder() {
+            const statusDiv = document.getElementById('status');
+            const currentPathSpan = document.getElementById('currentPath');
+            statusDiv.innerText = '📂 Открываю окно выбора папки...';
+            
+            try {
+                const response = await fetch('http://localhost:3000/api/select-folder');
+                const result = await response.json();
+                
+                if (result.success && result.path) {
+                    globalSelectedFolder = result.path;
+                    currentPathSpan.innerHTML = `<span style="color: #00ffcc">${globalSelectedFolder}</span>`;
+                    statusDiv.innerText = '✅ Рабочая папка успешно привязана!';
+                } else {
+                    // Если пользователь нажал Отмена
+                    if (!globalSelectedFolder) {
+                        currentPathSpan.innerHTML = `<span style="color: #ff4a4a; font-weight: bold;">ДИРЕКТОРИЯ НЕ ВЫБРАНА</span>`;
+                    }
+                    statusDiv.innerText = '';
+                }
+            } catch (err) {
+                statusDiv.innerText = '❌ Ошибка сети: бэкэнд-сервер не запущен в терминале!';
+            }
+        }
+
+        // Отправка пути и задачи на бэкэнд
+        async function sendTask() {
+            const taskText = document.getElementById('taskInput').value;
+            const statusDiv = document.getElementById('status');
+
+            if (!globalSelectedFolder) { 
+                alert('Пожалуйста, сначала выберите рабочую папку на вашем компьютере!'); 
+                return; 
+            }
+            if (!taskText.trim()) { 
+                alert('Напишите, что именно должен сделать ИИ!'); 
+                return; 
+            }
+
+            statusDiv.innerText = '⏳ Бэкэнд сканирует файлы папки и отправляет запрос в Gemini...';
+
+            try {
+                const response = await fetch('http://localhost:3000/api/task', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ targetDir: globalSelectedFolder, task: taskText })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    statusDiv.innerHTML = '🎉 Готово! Робот успешно обновил файлы:<br>' + 
+                                          result.files.map(f => `📄 ${f}`).join('<br>');
+                } else {
+                    statusDiv.innerText = '❌ Ошибка на стороне сервера: ' + result.error;
+                }
+            } catch (err) {
+                statusDiv.innerText = '❌ Не удалось связаться с сервером. Проверьте окно консоли.';
+            }
+        }
+    </script>
+</body>
+</html>
