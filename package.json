@@ -1,0 +1,20 @@
+{
+  "name": "aihelper",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@google/genai": "^2.9.0",
+    "dotenv": "^17.4.2"
+  },
+  "devDependencies": {
+    "electron": "^42.4.1"
+  }
+}
