@@ -1,12 +1,11 @@
 require('dotenv').config();
-const { GoogleGenAI } = require("@google/genai");
 const fs = require("fs");
 const path = require("path");
 const http = require("http");
 const { exec } = require("child_process"); // Модуль для запуска системных окон Windows
 
-const apiKey = process.env.GEMINI_API_KEY;
-const ai = new GoogleGenAI({ apiKey: apiKey });
+const apiKey = process.env.GROQ_API_KEY;
+const GROQ_MODEL = "llama-3.3-70b-versatile";
 
 // Функция рекурсивного обхода и чтения файлов в папке
 function scanDirectory(dir, targetDir, fileList = []) {
@@ -114,13 +113,29 @@ const server = http.createServer((req, res) => {
                 Выполни задачу пользователя. Ты должен вернуть ответ СТРОГО в формате JSON-массива объектов, без markdown разметки.
                 Формат ответа: [{"filePath": "относительный_путь", "newContent": "абсолютно полный новый код файла"}]`;
 
-                const response = await ai.models.generateContent({
-                    model: "gemini-2.5-flash",
-                    contents: `${projectContext}\n\nЗадача от пользователя: ${task}`,
-                    config: { systemInstruction }
+                const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${apiKey}`
+                    },
+                    body: JSON.stringify({
+                        model: GROQ_MODEL,
+                        messages: [
+                            { role: "system", content: systemInstruction },
+                            { role: "user", content: `${projectContext}\n\nЗадача от пользователя: ${task}` }
+                        ],
+                        temperature: 0.2
+                    })
                 });
 
-                let cleanText = response.text.trim();
+                const groqData = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(groqData.error?.message || `Groq HTTP ошибка ${response.status}`);
+                }
+
+                let cleanText = groqData.choices[0].message.content.trim();
                 if (cleanText.startsWith("```json")) cleanText = cleanText.substring(7);
                 if (cleanText.startsWith("```")) cleanText = cleanText.substring(3);
                 if (cleanText.endsWith("```")) cleanText = cleanText.substring(0, cleanText.length - 3);

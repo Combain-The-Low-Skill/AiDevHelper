@@ -6,7 +6,6 @@
     "start": "node code.js"
   },
   "dependencies": {
-    "@google/genai": "^2.9.0",
     "child_process": "^1.0.2",
     "dotenv": "^17.4.2"
   }
