@@ -1,12 +1,19 @@
 {
   "name": "aidevhelper",
-  "version": "1.0.0",
-  "main": "code.js",
+  "version": "2.0.0",
+  "description": "Автономный AI-агент, работающий с файлами в выбранной директории, с очередью задач и экономией токенов под дешёвые тарифы API.",
+  "main": "core/index.js",
+  "type": "commonjs",
   "engines": {
     "node": ">=18.0.0"
   },
   "scripts": {
-    "start": "node code.js"
+    "start": "node server/start.js",
+    "test:foundation": "node test/foundation.test.js",
+    "test:engine": "node test/engine.test.js",
+    "test:agent": "node test/agent.test.js",
+    "test:server": "node test/server.test.js",
+    "test": "node test/foundation.test.js && node test/engine.test.js && node test/agent.test.js && node test/server.test.js"
   },
   "dependencies": {
     "dotenv": "^17.4.2"

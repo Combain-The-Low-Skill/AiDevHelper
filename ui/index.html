@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="adhp-token" content="__ADHP_TOKEN__" />
+<title>AiDevHelper</title>
+<style>
+  :root{
+    --bg:#0E1116; --panel:#161B22; --panel-2:#1B2230; --border:#2A313C;
+    --text:#C9D1D9; --muted:#8B949E; --faint:#5B6470;
+    --work:#3FB6A8; --wait:#E0A33E; --danger:#E5534B; --ok:#5BC083;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px;line-height:1.5}
+  button{font-family:inherit;cursor:pointer}
+  a{color:var(--work)}
+  .wrap{display:grid;grid-template-columns:1fr 320px;gap:1px;background:var(--border);min-height:100vh}
+  .main{background:var(--bg);padding:28px 32px;overflow:auto}
+  .rail{background:var(--panel);padding:22px 20px;overflow:auto}
+  header.top{display:flex;align-items:baseline;gap:12px;margin-bottom:24px}
+  header.top h1{font-size:18px;font-weight:650;letter-spacing:.2px;margin:0}
+  header.top .tag{font-family:var(--mono);font-size:11px;color:var(--faint);border:1px solid var(--border);border-radius:4px;padding:2px 7px}
+
+  .field{margin-bottom:16px}
+  .field label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.6px}
+  .folderrow{display:flex;gap:8px}
+  input[type=text],textarea{width:100%;background:var(--panel-2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:10px 12px;font-family:var(--mono);font-size:13px}
+  textarea{min-height:96px;resize:vertical;font-family:var(--sans);font-size:14px}
+  input:focus,textarea:focus{outline:2px solid var(--work);outline-offset:-1px;border-color:transparent}
+
+  .btn{border:1px solid var(--border);background:var(--panel-2);color:var(--text);border-radius:6px;padding:10px 16px;font-size:13px;font-weight:550;transition:.12s}
+  .btn:hover{border-color:var(--faint)}
+  .btn.primary{background:var(--work);border-color:var(--work);color:#05201D}
+  .btn.primary:hover{filter:brightness(1.08)}
+  .btn.ghost{background:transparent}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .actions{display:flex;gap:10px;margin:6px 0 24px}
+
+  .log{background:#0A0D11;border:1px solid var(--border);border-radius:8px;padding:14px 16px;font-family:var(--mono);font-size:12.5px;min-height:60px;max-height:300px;overflow:auto;white-space:pre-wrap}
+  .log .line{padding:1px 0}
+  .log .tool{color:var(--work)}
+  .log .err{color:var(--danger)}
+  .log .done{color:var(--ok)}
+  .log .muted{color:var(--faint)}
+
+  .changes{margin-top:22px}
+  .changes h2{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:0 0 12px}
+  .filecard{border:1px solid var(--border);border-radius:8px;margin-bottom:12px;overflow:hidden}
+  .filecard .fhead{display:flex;justify-content:space-between;align-items:center;background:var(--panel);padding:9px 13px;font-family:var(--mono);font-size:12.5px}
+  .filecard .badge{font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--wait)}
+  .diff{font-family:var(--mono);font-size:12px;max-height:320px;overflow:auto}
+  .diff .dl{padding:0 13px;white-space:pre-wrap;word-break:break-word}
+  .diff .add{background:rgba(91,192,131,.12);color:#9be3b4}
+  .diff .del{background:rgba(229,83,75,.12);color:#f0a39d}
+  .diff .ctx{color:var(--muted)}
+
+  /* Шкалы лимитов — подпись страницы */
+  .rail h2{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--faint);margin:0 0 14px}
+  .prov{font-family:var(--mono);font-size:12px;color:var(--muted);margin-bottom:20px;line-height:1.7}
+  .prov b{color:var(--text);font-weight:600}
+  .gauge{margin-bottom:16px}
+  .gauge .glabel{display:flex;justify-content:space-between;font-family:var(--mono);font-size:11.5px;color:var(--muted);margin-bottom:5px}
+  .gauge .bar{height:6px;background:var(--panel-2);border-radius:3px;overflow:hidden}
+  .gauge .fill{height:100%;width:0;background:var(--work);border-radius:3px;transition:width .5s ease}
+  .cooldown{margin:18px 0 24px;padding:10px 12px;border:1px solid var(--wait);border-radius:6px;color:var(--wait);font-family:var(--mono);font-size:12px;display:none}
+  .cooldown.show{display:block}
+  .keybox{margin-bottom:22px}
+  .keybox label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--faint);margin-bottom:7px}
+  .keybox #keyState{letter-spacing:0;text-transform:none}
+  .keybox .ok{color:var(--ok)} .keybox .no{color:var(--wait)}
+
+  .queue h2{margin-top:8px}
+  .qitem{border:1px solid var(--border);border-radius:6px;padding:9px 11px;margin-bottom:8px;font-size:12px}
+  .qitem .qtask{color:var(--text);margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .qitem .qstatus{font-family:var(--mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.5px}
+  .qstatus.pending{color:var(--muted)} .qstatus.running{color:var(--work)}
+  .qstatus.done{color:var(--ok)} .qstatus.failed{color:var(--danger)}
+  .qempty{color:var(--faint);font-size:12px}
+  .railbtns{display:flex;gap:8px;margin:10px 0 20px}
+  .railbtns .btn{flex:1;padding:7px;font-size:12px}
+
+  @media(max-width:820px){.wrap{grid-template-columns:1fr}.rail{order:-1}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <main class="main">
+    <header class="top">
+      <h1>AiDevHelper</h1>
+      <span class="tag" id="modeTag">режим: —</span>
+    </header>
+
+    <div class="field">
+      <label>Рабочая папка</label>
+      <div class="folderrow">
+        <input type="text" id="folder" placeholder="Выберите папку или введите путь" />
+        <button class="btn" id="pickBtn">Выбрать…</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Задача агенту</label>
+      <textarea id="task" placeholder="Например: переименуй переменную greeting в message во всех файлах и добавь комментарий в начало app.js"></textarea>
+    </div>
+
+    <div class="actions">
+      <button class="btn primary" id="runBtn">Запустить сейчас</button>
+      <button class="btn ghost" id="queueBtn">В очередь</button>
+    </div>
+
+    <div class="field">
+      <label>Ход работы</label>
+      <div class="log" id="log"><span class="muted">Агент ещё не запускался.</span></div>
+    </div>
+
+    <div class="changes" id="changes" style="display:none">
+      <h2>Предложенные изменения</h2>
+      <div id="diffs"></div>
+      <div class="actions">
+        <button class="btn primary" id="applyBtn">Применить изменения</button>
+        <button class="btn ghost" id="cancelBtn">Отменить</button>
+      </div>
+    </div>
+  </main>
+
+  <aside class="rail">
+    <h2>Бюджет API</h2>
+    <div class="prov" id="prov">загрузка…</div>
+
+    <div class="keybox">
+      <label>Ключ API <span id="keyState"></span></label>
+      <div class="folderrow">
+        <input type="password" id="apiKey" placeholder="вставьте ключ" />
+        <button class="btn" id="saveKey">Сохранить</button>
+      </div>
+    </div>
+
+    <div class="gauge"><div class="glabel"><span>Запросы / мин</span><span id="rpmTxt">—</span></div><div class="bar"><div class="fill" id="rpmFill"></div></div></div>
+    <div class="gauge"><div class="glabel"><span>Токены / мин</span><span id="tpmTxt">—</span></div><div class="bar"><div class="fill" id="tpmFill"></div></div></div>
+    <div class="gauge"><div class="glabel"><span>Запросы / сутки</span><span id="rpdTxt">—</span></div><div class="bar"><div class="fill" id="rpdFill"></div></div></div>
+
+    <div class="cooldown" id="cooldown"></div>
+
+    <div class="queue">
+      <h2>Очередь</h2>
+      <div class="railbtns">
+        <button class="btn" id="startQ">Запустить</button>
+        <button class="btn" id="stopQ">Остановить</button>
+      </div>
+      <div id="queue"><span class="qempty">Очередь пуста.</span></div>
+    </div>
+  </aside>
+</div>
+<script src="/app.js"></script>
+</body>
+</html>

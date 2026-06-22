@@ -1,0 +1,61 @@
+{
+  "_comment": "Центральный конфиг приложения. Меняя его, можно переключать провайдера, лимиты и полномочия агента — без правки кода. Лимиты у каждого провайдера свои и зависят от тарифа: посмотри их в личном кабинете и впиши сюда.",
+
+  "activeProvider": "groq",
+
+  "providers": {
+    "groq": {
+      "label": "Groq",
+      "baseUrl": "https://api.groq.com/openai/v1",
+      "apiKeyEnv": "GROQ_API_KEY",
+      "model": "llama-3.3-70b-versatile",
+      "limits": {
+        "rpm": 30,
+        "tpm": 12000,
+        "rpd": 14400,
+        "maxOutputTokens": 32768
+      }
+    },
+    "gemini": {
+      "label": "Google Gemini",
+      "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+      "apiKeyEnv": "GEMINI_API_KEY",
+      "model": "gemini-2.0-flash",
+      "limits": {
+        "rpm": 15,
+        "tpm": 1000000,
+        "rpd": 1500,
+        "maxOutputTokens": 8192
+      }
+    }
+  },
+
+  "capabilities": {
+    "_comment": "Полномочия агента. По умолчанию безопасный режим: только файлы. Запуск команд выключен и будет включаться отдельно в настройках на следующих этапах.",
+    "readFiles": true,
+    "editFiles": true,
+    "createFiles": true,
+    "runCommands": false
+  },
+
+  "agent": {
+    "_comment": "applyMode: 'manual' — показать diff и ждать подтверждения (безопасно); 'auto' — применять сразу, каждая правка в бэкапе для отката. maxIterations — предел шагов цикла на одну задачу.",
+    "applyMode": "manual",
+    "maxIterations": 25,
+    "maxTokensPerCall": 2048
+  },
+
+  "safety": {
+    "_comment": "Перед каждой записью на диск делаем резервную копию изменяемых файлов в backupDir. confirmBeforeApply оставляет ручное подтверждение diff перед записью.",
+    "backupDir": ".aidevhelper/backups",
+    "confirmBeforeApply": true,
+    "detectGitRepo": true
+  },
+
+  "retry": {
+    "_comment": "Поведение при сбоях/лимитах. maxAttempts большой намеренно: режим «медленно, но верно» — программа терпеливо ждёт окна сброса часами и продолжает сама.",
+    "maxAttempts": 100,
+    "baseDelayMs": 1000,
+    "maxDelayMs": 60000
+  }
+}
